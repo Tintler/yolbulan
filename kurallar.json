@@ -1,0 +1,7 @@
+{
+  "review_folder": "Incelenecekler",
+  "rules": [
+    {"folder": "Uzaylilar", "name_terms": ["uzaylı", "uzaylılar", "alien", "aliens", "extraterrestrial"], "speech_terms": ["uzaylı", "uzaylılar", "alien", "aliens", "extraterrestrial"]},
+    {"folder": "Sanallastirma", "name_terms": ["Hyper-V", "sanal makine", "virtual machine"], "speech_terms": ["Hyper-V", "sanal makine", "virtual machine"]}
+  ]
+}

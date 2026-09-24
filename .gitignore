@@ -1,0 +1,19 @@
+# Local Python environment
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local user data, transcripts and move history
+calisma_verisi/
+
+# PyInstaller output
+build/
+dist/
+*.spec
+yolbulan-derleme-*/
+
+# Generated release archives and logs
+*.zip
+*.log
