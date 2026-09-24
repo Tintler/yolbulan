@@ -116,10 +116,12 @@ def config_load(path):
         names.add(name.casefold())
         name_terms, speech_terms = rule_terms(rule, 'name'), rule_terms(rule, 'speech')
         negative_name = rule.get('name_negative_terms', [])
+        audio_description = rule.get('audio_description', '')
         if (not isinstance(name_terms, list) or not isinstance(speech_terms, list) or
-                not (name_terms or speech_terms) or
+                not isinstance(audio_description, str) or
+                not (name_terms or speech_terms or audio_description.strip()) or
                 any(not isinstance(t, str) or not t.strip() for t in name_terms + speech_terms)):
-            raise ValueError(f'{name}: dosya adı veya ses için en az bir terim gerekli.')
+            raise ValueError(f'{name}: dosya adı terimi veya ses içeriği tanımı gerekli.')
         if (not isinstance(negative_name, list) or
                 any(not isinstance(t, str) or not t.strip() for t in negative_name)):
             raise ValueError(f'{name}: negatif terimler dolu metinlerden oluşmalı.')

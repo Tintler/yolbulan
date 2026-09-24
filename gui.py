@@ -1,4 +1,6 @@
 """Windows desktop interface for the local speech video sorter."""
+import gc
+import hashlib
 import json
 import os
 import re
@@ -16,6 +18,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFil
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 import ayikla as core
+import ses_yonlendirme as audio_ai
 
 BASE = Path(__file__).resolve().parent
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else BASE
@@ -70,14 +73,20 @@ class Worker(QObject):
         finally:
             self.finished.emit()
 
-    def analyze(self, paths, rules, signature, model, device, compute, batch, beam):
+    def analyze(self, paths, rules, signature, model, device, compute, batch, beam,
+                lm_host, lm_port, lm_model, lm_thinking, lm_chunk_size, lm_retries):
+        models = audio_ai.list_models(lm_host, lm_port)
+        if lm_model not in models:
+            raise RuntimeError(f'LM Studio model listesinde “{lm_model}” bulunamadı. Modelleri getir düğmesini kullanın.')
         engine = None
         total = len(paths)
+        transcripts = []
+        # Finish Whisper for all videos, then release its VRAM before the text model runs.
         for index, path in enumerate(paths, 1):
             if self.cancelled:
                 break
             path = Path(path)
-            self.progress.emit(index - 1, total, path.name)
+            self.progress.emit(index - 1, total * 2, path.name)
             self.result.emit(('working', str(path)))
             try:
                 stat = core.fingerprint(path)
@@ -93,17 +102,46 @@ class Worker(QObject):
                     core.write_json(core.cache_path(STATE / 'transcripts', path), {
                         'source': str(path), 'fingerprint': stat, 'signature': signature,
                         'model': model, 'segments': segments})
-                text = ' '.join(s['text'] for s in segments)
-                hits = [{'folder': r['folder'], 'terms': [t for t in core.rule_terms(r, 'speech') if core.matches(text, t)]}
-                        for r in rules]
-                hits = [h for h in hits if h['terms']]
+                transcripts.append((path, stat))
+            except Exception as exc:
+                self.result.emit(('error', {'path': str(path), 'message': str(exc)}))
+            self.progress.emit(index, total * 2, path.name)
+        engine = None
+        gc.collect()
+        for index, (path, stat) in enumerate(transcripts, 1):
+            if self.cancelled:
+                break
+            self.progress.emit(total + index - 1, total * 2, path.name)
+            self.result.emit(('classifying', str(path)))
+            try:
+                segments = core.read_json(core.cache_path(STATE / 'transcripts', path))['segments']
+                ai_signature = json.dumps({'version': 3, 'fingerprint': stat, 'whisper': signature,
+                    'lm_host': lm_host, 'lm_port': lm_port, 'lm_model': lm_model,
+                    'thinking': lm_thinking, 'chunk_size': lm_chunk_size,
+                    'rules': [{'folder': r['folder'], 'audio_description': r.get('audio_description', '')}
+                              for r in rules]}, ensure_ascii=False, sort_keys=True)
+                ai_signature = hashlib.sha256(ai_signature.encode('utf-8')).hexdigest()
+                ai_cache_path = core.cache_path(STATE / 'classifications', path)
+                ai_cache = core.read_json(ai_cache_path)
+                if ai_cache and ai_cache.get('signature') == ai_signature:
+                    hits = ai_cache['hits']
+                else:
+                    hits = audio_ai.classify(segments, rules, lm_host, lm_port, lm_model,
+                        progress=lambda current, total: self.result.emit(('ai_progress', (str(path), current, total))),
+                        on_retry=lambda attempt, maximum, message: self.result.emit(
+                            ('ai_retry', (str(path), attempt, maximum, message))),
+                        cancelled=lambda: self.cancelled, thinking=lm_thinking,
+                        chunk_size=lm_chunk_size, retries=lm_retries)
+                    if hits is None:
+                        break
+                    core.write_json(ai_cache_path, {'signature': ai_signature, 'hits': hits})
                 if hits:
                     self.result.emit(('hit', {'path': str(path), 'stat': stat, 'hits': hits}))
                 else:
                     self.result.emit(('unmatched', str(path)))
             except Exception as exc:
                 self.result.emit(('error', {'path': str(path), 'message': str(exc)}))
-            self.progress.emit(index, total, path.name)
+            self.progress.emit(total + index, total * 2, path.name)
 
 
 class MainWindow(QMainWindow):
@@ -114,6 +152,7 @@ class MainWindow(QMainWindow):
         self.rows = []
         self.remaining = []
         self.phase = 'ready'
+        self.analysis_cancelled = False
         self.worker = self.thread = None
         self.settings = core.read_json(SETTINGS, {}) or {}
         root = QWidget()
@@ -144,17 +183,18 @@ class MainWindow(QMainWindow):
 
         self.rules = QTableWidget(0, 4)
         self.rules.setHorizontalHeaderLabels(['Hedef alt klasör', 'Dosya adı terimleri (+)', 'Dosya adı engelleri (−)',
-                                              'Ses terimleri'])
+                                              'Ses içeriği tanımı (AI)'])
         self.rules.setSortingEnabled(True)
         self.rules.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         for col in range(1, 4):
             self.rules.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         self.rules.horizontalHeaderItem(2).setToolTip('Bu terimlerden biri dosya adında geçerse bu hedef eşleşmez. Diğer hedefleri etkilemez.')
+        self.rules.horizontalHeaderItem(3).setToolTip('LM Studio transkriptin tamamını bu tanıma göre değerlendirir. Örnek: Anne ile kızının aile bağları üzerine konuşması.')
         self.rules.verticalHeader().setVisible(False)
         self.rules.setMinimumHeight(130)
         for rule in self.settings.get('rules', core.read_json(BASE / 'kurallar.json', {'rules': []})['rules']):
             self.add_rule(rule['folder'], ', '.join(core.rule_terms(rule, 'name')),
-                          ', '.join(core.rule_terms(rule, 'speech')),
+                          rule.get('audio_description', ', '.join(core.rule_terms(rule, 'speech'))),
                           ', '.join(rule.get('name_negative_terms', [])))
         self.rules.sortItems(0, Qt.SortOrder.AscendingOrder)
         rule_controls = QHBoxLayout()
@@ -228,6 +268,63 @@ class MainWindow(QMainWindow):
         cuda_browse.clicked.connect(self.browse_cuda)
         cuda_row.addWidget(cuda_browse)
         outer.addLayout(cuda_row)
+        lm_row = QHBoxLayout()
+        lm_row.addWidget(QLabel('LM Studio IP:'))
+        self.lm_host = QLineEdit(self.settings.get('lm_host', '127.0.0.1'))
+        self.lm_host.setPlaceholderText('127.0.0.1 veya yerel ağ IP adresi')
+        self.lm_host.setMaximumWidth(155)
+        lm_row.addWidget(self.lm_host)
+        lm_row.addWidget(QLabel('Port:'))
+        self.lm_port = QSpinBox()
+        self.lm_port.setRange(1, 65535)
+        self.lm_port.setValue(self.settings.get('lm_port', 1234))
+        lm_row.addWidget(self.lm_port)
+        lm_row.addWidget(QLabel('Metin modeli:'))
+        self.lm_model = QComboBox()
+        self.lm_model.setEditable(True)
+        self.lm_model.setMinimumWidth(210)
+        self.lm_model.setCurrentText(self.settings.get('lm_model', ''))
+        self.lm_model.setToolTip('LM Studio API üzerinde yüklü olan metin modelinin kimliği. İsterseniz elle yazabilirsiniz.')
+        lm_row.addWidget(self.lm_model, 1)
+        reload_models = QPushButton('Modelleri getir')
+        reload_models.clicked.connect(self.load_lm_models)
+        lm_row.addWidget(reload_models)
+        outer.addLayout(lm_row)
+        lm_options = QHBoxLayout()
+        lm_options.addWidget(QLabel('Thinking:'))
+        self.lm_thinking = QComboBox()
+        self.lm_thinking.addItems(['Model ayarı', 'Kapalı'])
+        self.lm_thinking.setCurrentText('Kapalı' if self.settings.get('lm_thinking') == 'off' else 'Model ayarı')
+        self.lm_thinking.setToolTip('Kapalı: LM Studio API isteğinde reasoning=off kullanılır. '
+                                   'Model bunu desteklemiyorsa hata gösterilir. Model ayarı: LM Studio seçimini kullanır.')
+        lm_options.addWidget(self.lm_thinking)
+        lm_options.addSpacing(20)
+        chunk_label = QLabel('Transkript penceresi:')
+        hint = ('Her istek için yaklaşık bu kadar karakter kullanılır. Komşu parçalar örtüşür; '
+                'bütün transkript işlenir. Büyük pencere daha çok bağlam ve model context kapasitesi gerektirir.')
+        chunk_label.setToolTip(hint)
+        lm_options.addWidget(chunk_label)
+        self.lm_chunk_size = QSpinBox()
+        self.lm_chunk_size.setRange(4000, 20000)
+        self.lm_chunk_size.setSingleStep(1000)
+        self.lm_chunk_size.setSuffix(' karakter')
+        self.lm_chunk_size.setValue(self.settings.get('lm_chunk_size', 12000))
+        self.lm_chunk_size.setToolTip(hint)
+        lm_options.addWidget(self.lm_chunk_size)
+        lm_options.addSpacing(20)
+        retry_label = QLabel('JSON yeniden deneme:')
+        retry_hint = ('Model geçersiz JSON, bilinmeyen kural veya doğrulanamayan alıntı döndürürse '
+                      'ek istek sayısı. Varsayılan 2: ilk istekle toplam en fazla 3 deneme. '
+                      'Bağlantı hataları ve başarılı yanıtlar tekrar edilmez.')
+        retry_label.setToolTip(retry_hint)
+        lm_options.addWidget(retry_label)
+        self.lm_retries = QSpinBox()
+        self.lm_retries.setRange(0, 5)
+        self.lm_retries.setValue(self.settings.get('lm_retries', 2))
+        self.lm_retries.setToolTip(retry_hint)
+        lm_options.addWidget(self.lm_retries)
+        lm_options.addStretch()
+        outer.addLayout(lm_options)
         self.model.currentTextChanged.connect(self.customize)
         self.batch.valueChanged.connect(self.customize)
         self.beam.valueChanged.connect(self.customize)
@@ -291,15 +388,19 @@ class MainWindow(QMainWindow):
         self.compute.currentTextChanged.connect(self.schedule_save)
         self.cuda_dir.textChanged.connect(self.schedule_save)
         self.mode.currentTextChanged.connect(self.schedule_save)
+        self.lm_host.textChanged.connect(self.schedule_save)
+        self.lm_port.valueChanged.connect(self.schedule_save)
+        self.lm_model.currentTextChanged.connect(self.schedule_save)
+        self.lm_thinking.currentTextChanged.connect(self.schedule_save)
+        self.lm_chunk_size.valueChanged.connect(self.schedule_save)
+        self.lm_retries.valueChanged.connect(self.schedule_save)
 
     def mode_changed(self, *_):
         self.update_count()
         if self.phase == 'names':
             self.update_name_summary()
 
-    def add_rule(self, folder, name_terms, speech_terms=None, name_negative=''):
-        if speech_terms is None:
-            speech_terms = name_terms
+    def add_rule(self, folder, name_terms, audio_description='', name_negative=''):
         sorting = self.rules.isSortingEnabled()
         self.rules.setSortingEnabled(False)
         r = self.rules.rowCount()
@@ -307,7 +408,7 @@ class MainWindow(QMainWindow):
         self.rules.setItem(r, 0, QTableWidgetItem(folder))
         self.rules.setItem(r, 1, QTableWidgetItem(name_terms))
         self.rules.setItem(r, 2, QTableWidgetItem(name_negative))
-        self.rules.setItem(r, 3, QTableWidgetItem(speech_terms))
+        self.rules.setItem(r, 3, QTableWidgetItem(audio_description))
         self.rules.setSortingEnabled(sorting)
         if sorting:
             self.rules.sortItems(0, Qt.SortOrder.AscendingOrder)
@@ -338,6 +439,20 @@ class MainWindow(QMainWindow):
         chosen = QFileDialog.getExistingDirectory(self, 'CUDA DLL klasörünü seç', self.cuda_dir.text())
         if chosen:
             self.cuda_dir.setText(chosen)
+
+    def load_lm_models(self):
+        try:
+            models = audio_ai.list_models(self.lm_host.text(), self.lm_port.value())
+            if not models:
+                raise ValueError('LM Studio model döndürmedi. Sunucuyu başlatıp bir metin modeli yükleyin.')
+            current = self.lm_model.currentText()
+            self.lm_model.clear()
+            self.lm_model.addItems(models)
+            if current in models:
+                self.lm_model.setCurrentText(current)
+            self.log_message(f'LM Studio: {len(models)} model listelendi.')
+        except Exception as exc:
+            QMessageBox.warning(self, 'LM Studio bağlantısı', str(exc))
 
     def configure_cuda(self):
         if self.device.currentText() != 'cuda':
@@ -382,9 +497,9 @@ class MainWindow(QMainWindow):
         for row in range(self.rules.rowCount()):
             folder = self.rules.item(row, 0).text().strip()
             name_terms = [x.strip() for x in self.rules.item(row, 1).text().split(',') if x.strip()]
-            speech_terms = [x.strip() for x in self.rules.item(row, 3).text().split(',') if x.strip()]
+            audio_description = self.rules.item(row, 3).text().strip()
             negative_name = [x.strip() for x in self.rules.item(row, 2).text().split(',') if x.strip()]
-            rules.append({'folder': folder, 'name_terms': name_terms, 'speech_terms': speech_terms,
+            rules.append({'folder': folder, 'name_terms': name_terms, 'audio_description': audio_description,
                           'name_negative_terms': negative_name})
         temp = STATE / 'rules-validation.json'
         core.write_json(temp, {'rules': rules})
@@ -397,11 +512,11 @@ class MainWindow(QMainWindow):
         for row in range(self.rules.rowCount()):
             folder = self.rules.item(row, 0).text() if self.rules.item(row, 0) else ''
             name_text = self.rules.item(row, 1).text() if self.rules.item(row, 1) else ''
-            speech_text = self.rules.item(row, 3).text() if self.rules.item(row, 3) else ''
+            audio_description = self.rules.item(row, 3).text() if self.rules.item(row, 3) else ''
             negative_name = self.rules.item(row, 2).text() if self.rules.item(row, 2) else ''
             rules.append({'folder': folder,
                           'name_terms': [s.strip() for s in name_text.split(',') if s.strip()],
-                          'speech_terms': [s.strip() for s in speech_text.split(',') if s.strip()],
+                          'audio_description': audio_description,
                           'name_negative_terms': [s.strip() for s in negative_name.split(',') if s.strip()]})
         try:
             core.write_json(SETTINGS, {'source': self.source.text(), 'rules': rules,
@@ -409,7 +524,12 @@ class MainWindow(QMainWindow):
                 'profile': self.profile.currentText(), 'model': self.model.currentText(),
                 'batch': self.batch.value(), 'beam': self.beam.value(),
                 'device': self.device.currentText(), 'compute': self.compute.currentText(),
-                'cuda_dir': self.cuda_dir.text().strip()})
+                'cuda_dir': self.cuda_dir.text().strip(),
+                'lm_host': self.lm_host.text().strip(), 'lm_port': self.lm_port.value(),
+                'lm_model': self.lm_model.currentText().strip(),
+                'lm_thinking': 'off' if self.lm_thinking.currentText() == 'Kapalı' else 'model',
+                'lm_chunk_size': self.lm_chunk_size.value(),
+                'lm_retries': self.lm_retries.value()})
             self.save_label.setText('Kaydedildi')
         except Exception as exc:
             self.save_label.setText('Kaydedilemedi')
@@ -485,7 +605,12 @@ class MainWindow(QMainWindow):
             status_item = QTableWidgetItem(entry['status'])
             self.color_status(status_item, entry['status'])
             self.list.setItem(i, 2, status_item)
-            self.list.setItem(i, 3, QTableWidgetItem(', '.join(t for h in entry['hits'] for t in h['terms'])))
+            matches = [f'{h["folder"]} {audio_ai.stamp(h["start"])}' if 'start' in h else
+                       ', '.join(h['terms']) for h in entry['hits']]
+            match_item = QTableWidgetItem(', '.join(matches))
+            match_item.setToolTip('\n'.join(f'{h["folder"]} · {audio_ai.stamp(h["start"])} · {h["evidence"]}'
+                                            for h in entry['hits'] if 'start' in h))
+            self.list.setItem(i, 3, match_item)
             if selectable:
                 target = QComboBox()
                 target.addItems(list(dict.fromkeys([r['folder'] for r in self.active_rules] + ['Incelenecekler', 'eslesme_yok'])))
@@ -632,7 +757,7 @@ class MainWindow(QMainWindow):
             color = QColor('#ffd874' if dark else '#865b00')
         elif status in ('Hata', 'Taşınamadı'):
             color = QColor('#ff9090' if dark else '#ad3030')
-        elif status.startswith(('Analiz ediliyor', 'Model yükleniyor', 'Taşınıyor')):
+        elif status.startswith(('Analiz ediliyor', 'Model yükleniyor', 'LM Studio değerlendiriyor', 'Taşınıyor')):
             color = QColor('#82bafc' if dark else '#155dad')
         elif status.startswith(('Dosya adı eşleşti', 'Ses eşleşti')):
             color = QColor('#caa9ff' if dark else '#7442a3')
@@ -654,6 +779,13 @@ class MainWindow(QMainWindow):
             self.primary.setText(f'Seçilen {selected} videoyu taşı')
 
     def advance(self):
+        if self.phase == 'names':
+            try:
+                if self.get_rules() != self.active_rules:
+                    raise ValueError('Kurallar taramadan sonra değişti. Önizlemeyi güncellemek için Yenile’ye basın.')
+            except Exception as exc:
+                QMessageBox.warning(self, 'Kurallar güncellendi', str(exc))
+                return
         self.run_name_only = self.phase == 'names' and self.mode.currentText() == 'Yalnızca dosya adı'
         selected = []
         deferred = []
@@ -673,6 +805,11 @@ class MainWindow(QMainWindow):
             self.remaining = [] if self.run_name_only else self.name_unmatched + deferred
             if self.remaining:
                 try:
+                    if not any(r.get('audio_description', '').strip() for r in self.active_rules):
+                        raise ValueError('Ses aşaması için en az bir kuralda Ses içeriği tanımı (AI) doldurun.')
+                    if not self.lm_model.currentText().strip():
+                        raise ValueError('LM Studio metin modeli seçin veya model kimliğini yazın.')
+                    audio_ai.base_url(self.lm_host.text(), self.lm_port.value())
                     self.configure_cuda()
                 except Exception as exc:
                     QMessageBox.warning(self, 'Ses analizi başlatılamadı', str(exc))
@@ -691,6 +828,7 @@ class MainWindow(QMainWindow):
             self.after_move()
 
     def start_worker(self, task, **kwargs):
+        self.analysis_cancelled = False
         self.mode.setEnabled(False)
         self.scan_btn.setEnabled(False)
         self.refresh.setEnabled(False)
@@ -737,11 +875,17 @@ class MainWindow(QMainWindow):
                     self.set_status(path, 'Analiz bekliyor')
                 self.render_rows()
                 self.progress.setVisible(True)
-                self.stage_label.setText(f'2 · Ses analizi başlıyor · {self.device.currentText().upper()} · {len(self.remaining)} video')
-                self.log_message(f'Ses analizi başlıyor: {self.device.currentText().upper()}, {self.model.currentText()}, batch {self.batch.value()}')
+                self.stage_label.setText(f'2 · Whisper + LM Studio · {len(self.remaining)} video')
+                self.log_message(f'Ses analizi: Whisper {self.model.currentText()} ({self.device.currentText().upper()}) '
+                                 f'→ LM Studio {self.lm_model.currentText()} · Thinking {self.lm_thinking.currentText()} '
+                                 f'· Pencere {self.lm_chunk_size.value()} karakter · JSON tekrar {self.lm_retries.value()}')
                 self.start_worker('analyze', paths=list(self.remaining), rules=list(self.active_rules),
                     signature=signature, model=self.model.currentText(), device=self.device.currentText(),
-                    compute=self.compute.currentText(), batch=self.batch.value(), beam=self.beam.value())
+                    compute=self.compute.currentText(), batch=self.batch.value(), beam=self.beam.value(),
+                    lm_host=self.lm_host.text().strip(), lm_port=self.lm_port.value(),
+                    lm_model=self.lm_model.currentText().strip(),
+                    lm_thinking='off' if self.lm_thinking.currentText() == 'Kapalı' else 'model',
+                    lm_chunk_size=self.lm_chunk_size.value(), lm_retries=self.lm_retries.value())
             else:
                 self.phase = 'done'
                 self.stage_label.setText('Bitti: analiz edilecek video kalmadı.')
@@ -786,6 +930,15 @@ class MainWindow(QMainWindow):
             self.refresh_transcript_button(data)
         elif kind == 'loading':
             self.set_status(data, f'Model yükleniyor · {self.device.currentText().upper()}')
+        elif kind == 'classifying':
+            self.set_status(data, 'LM Studio değerlendiriyor')
+        elif kind == 'ai_progress':
+            path, current, total = data
+            self.stage_label.setText(f'2 · LM Studio değerlendiriyor: {current}/{total} parça · {Path(path).name}')
+        elif kind == 'ai_retry':
+            path, attempt, maximum, message = data
+            self.stage_label.setText(f'2 · LM Studio yeniden deniyor: {attempt}/{maximum} · {Path(path).name}')
+            self.log_message(f'YENİDEN DENENİYOR · {Path(path).name} · {attempt}/{maximum}: {message}')
         elif kind == 'working':
             self.set_status(data, f'Analiz ediliyor · {self.device.currentText().upper()}')
         elif kind == 'error':
@@ -794,6 +947,10 @@ class MainWindow(QMainWindow):
             self.log_message(f'HATA: {Path(data["path"]).name}: {data["message"]}')
         elif kind == 'fatal':
             self.log_message(f'HATA: {data}')
+            for entry in self.rows:
+                if entry['status'].startswith(('Analiz bekliyor', 'Analiz ediliyor',
+                                                'Model yükleniyor', 'LM Studio değerlendiriyor')):
+                    self.set_status(entry['path'], 'Hata')
 
     def on_finished(self, task):
         self.cancel.setEnabled(False)
@@ -810,6 +967,11 @@ class MainWindow(QMainWindow):
             self.after_move()
         else:
             self.phase = 'speech'
+            if self.analysis_cancelled:
+                for entry in self.rows:
+                    if entry['status'].startswith(('Analiz bekliyor', 'Analiz ediliyor',
+                                                    'Model yükleniyor', 'LM Studio değerlendiriyor')):
+                        self.set_status(entry['path'], 'Durduruldu')
             self.progress.setVisible(False)
             self.render_rows()
             matched = sum(e['status'] == 'Ses eşleşti · onay bekliyor' for e in self.rows)
@@ -824,8 +986,9 @@ class MainWindow(QMainWindow):
 
     def cancel_worker(self):
         if self.worker:
+            self.analysis_cancelled = True
             self.worker.cancelled = True
-            self.log_message('Mevcut video bitince analiz duracak.')
+            self.log_message('Geçerli video veya LM Studio isteği bitince analiz duracak.')
 
     def undo(self):
         if QMessageBox.question(self, 'Geri al', 'Kayıtlı ve değişmemiş taşımalar geri alınsın mı?') != QMessageBox.StandardButton.Yes:
