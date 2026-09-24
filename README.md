@@ -1,7 +1,6 @@
-<h1 align="center">
-  <img src="Yolbulan.png" alt="Yolbulan ikonu" width="64" height="64">
-  Yolbulan
-</h1>
+<p align="center"><img src="Yolbulan.png" alt="Yolbulan ikonu" width="72" height="72"></p>
+
+<h1 align="center">Yolbulan</h1>
 
 <p align="center">A Windows app that sorts videos into folders based on filenames or locally transcribed speech.</p>
 
