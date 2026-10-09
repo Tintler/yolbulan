@@ -2,7 +2,7 @@
 import shutil
 import subprocess
 import sys
-import tempfile
+import uuid
 from pathlib import Path
 
 
@@ -13,8 +13,12 @@ def build():
     if sys.platform != 'win32':
         raise RuntimeError('Windows EXE yalnız Windows üzerinde derlenebilir.')
     destination = ROOT / 'dist' / 'Yolbulan'
-    with tempfile.TemporaryDirectory(prefix='yolbulan-derleme-', dir=ROOT) as temporary:
-        temp = Path(temporary)
+    # A plain mkdir inherits the project folder's permissions. tempfile.mkdtemp on
+    # Windows (Python 3.13+) restricts access to the current user, and that ACL would
+    # travel with the moved build, blocking copies over a network share.
+    temp = ROOT / f'yolbulan-derleme-{uuid.uuid4().hex[:8]}'
+    temp.mkdir()
+    try:
         args = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
                 '--onedir', '--windowed', '--name', 'Yolbulan', '--icon', str(ROOT / 'Yolbulan.ico'),
                 '--add-data', f'{ROOT / "kurallar.json"}:.',
@@ -44,6 +48,8 @@ def build():
             if backup.exists() and not destination.exists():
                 backup.replace(destination)
             raise
+    finally:
+        shutil.rmtree(temp, ignore_errors=True)
     print(f'Derlendi: {destination / "Yolbulan.exe"}')
     print(f'Ayarlar ve transkriptler: {destination / "calisma_verisi"}')
 
