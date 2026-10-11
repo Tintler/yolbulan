@@ -14,7 +14,7 @@ from PySide6.QtCore import (QAbstractTableModel, QEvent, QModelIndex, QObject, Q
     QThread, QTimer, Qt, Signal)
 from PySide6.QtGui import (QBrush, QColor, QIcon, QKeySequence, QPalette, QShortcut, QTextCharFormat,
     QTextCursor, QTextLength, QTextTableFormat)
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QComboBox, QDialog,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSpinBox, QStyle,
     QStyleOptionButton, QStyleOptionViewItem, QStyledItemDelegate, QTabWidget, QTableView, QTableWidget,
@@ -37,7 +37,7 @@ PROFILES = {
 DEFAULTS = {'source': '', 'mode': 'Dosya adı + ses analizi', 'profile': 'Dengeli', 'model': 'small',
             'batch': 8, 'beam': 5, 'device': 'cuda', 'compute': 'float16', 'cuda_dir': '',
             'lm_host': '127.0.0.1', 'lm_port': 1234, 'lm_model': '', 'lm_thinking': 'model',
-            'lm_chunk_size': 12000, 'lm_retries': 2}
+            'lm_whole': True, 'lm_chunk_size': 12000, 'lm_retries': 2}
 MODE_SPEECH, MODE_NAME = 'Dosya adı + ses analizi', 'Yalnızca dosya adı'
 REVIEW, NO_MATCH, STAY = 'Incelenecekler', 'eslesme_yok', '— yerinde kalsın'
 
@@ -232,7 +232,7 @@ class Worker(QObject):
             self.result.emit(('working', (str(path), 'LM Studio değerlendiriyor')))
             try:
                 segments = core.read_json(core.cache_path(TRANSCRIPTS, path))['segments']
-                ai_signature = json.dumps({'version': 3, 'fingerprint': stat, 'whisper': signature,
+                ai_signature = json.dumps({'version': 4, 'fingerprint': stat, 'whisper': signature,
                     'lm_host': lm_host, 'lm_port': lm_port, 'lm_model': lm_model,
                     'thinking': lm_thinking, 'chunk_size': lm_chunk_size,
                     'rules': [{'folder': r['folder'], 'audio_description': r.get('audio_description', '')}
@@ -598,11 +598,22 @@ class SettingsDialog(QDialog):
         self.lm_thinking.setCurrentText('Kapalı' if s['lm_thinking'] == 'off' else 'Model ayarı')
         self.lm_thinking.setToolTip('Kapalı: istekte reasoning=off kullanılır; model desteklemiyorsa hata gösterilir.')
         self.lm_chunk_size = QSpinBox()
-        self.lm_chunk_size.setRange(4000, 20000)
-        self.lm_chunk_size.setSingleStep(1000)
+        self.lm_chunk_size.setRange(4000, 200000)
+        self.lm_chunk_size.setSingleStep(4000)
         self.lm_chunk_size.setSuffix(' karakter')
-        self.lm_chunk_size.setValue(s['lm_chunk_size'])
-        self.lm_chunk_size.setToolTip('Her istekte kullanılan yaklaşık transkript uzunluğu. Komşu parçalar örtüşür.')
+        self.lm_chunk_size.setValue(max(4000, s['lm_chunk_size']))
+        self.lm_chunk_size.setToolTip('Tamamı kapalıyken her istekte kullanılan yaklaşık transkript uzunluğu. '
+                                      'Komşu parçalar örtüşür.')
+        self.lm_whole = QCheckBox('Tamamı tek istekte')
+        self.lm_whole.setToolTip('Transkript bölünmeden gider; model birbirinden uzak bölümleri ilişkilendirebilir. '
+                                 'LM Studio’da modelin Context Length değeri yeterli olmalı (1 saatlik konuşma '
+                                 'için yaklaşık 32768).')
+        self.lm_whole.toggled.connect(lambda whole: self.lm_chunk_size.setEnabled(not whole))
+        self.lm_whole.setChecked(s['lm_whole'])
+        self.lm_chunk_size.setEnabled(not s['lm_whole'])
+        chunk_row = QHBoxLayout()
+        chunk_row.addWidget(self.lm_whole)
+        chunk_row.addWidget(self.lm_chunk_size, 1)
         self.lm_retries = QSpinBox()
         self.lm_retries.setRange(0, 5)
         self.lm_retries.setValue(s['lm_retries'])
@@ -611,7 +622,7 @@ class SettingsDialog(QDialog):
         lm_form.addRow('Port:', self.lm_port)
         lm_form.addRow('Metin modeli:', model_row)
         lm_form.addRow('Thinking:', self.lm_thinking)
-        lm_form.addRow('Transkript penceresi:', self.lm_chunk_size)
+        lm_form.addRow('Transkript penceresi:', chunk_row)
         lm_form.addRow('JSON yeniden deneme:', self.lm_retries)
         layout.addWidget(whisper, 1)
         layout.addWidget(lm, 1)
@@ -681,7 +692,8 @@ class SettingsDialog(QDialog):
             'lm_host': self.lm_host.text().strip(), 'lm_port': self.lm_port.value(),
             'lm_model': self.lm_model.currentText().strip(),
             'lm_thinking': 'off' if self.lm_thinking.currentText() == 'Kapalı' else 'model',
-            'lm_chunk_size': self.lm_chunk_size.value(), 'lm_retries': self.lm_retries.value()}
+            'lm_whole': self.lm_whole.isChecked(), 'lm_chunk_size': self.lm_chunk_size.value(),
+            'lm_retries': self.lm_retries.value()}
         super().accept()
 
 
@@ -1157,7 +1169,8 @@ class MainWindow(QMainWindow):
         self.start_worker('analyze', paths=paths, rules=rules, signature=signature, model=s['model'],
             device=s['device'], compute=s['compute'], batch=s['batch'], beam=s['beam'],
             lm_host=s['lm_host'], lm_port=s['lm_port'], lm_model=s['lm_model'],
-            lm_thinking=s['lm_thinking'], lm_chunk_size=s['lm_chunk_size'], lm_retries=s['lm_retries'])
+            lm_thinking=s['lm_thinking'], lm_chunk_size=0 if s['lm_whole'] else s['lm_chunk_size'],
+            lm_retries=s['lm_retries'])
 
     def cancel_analysis(self):
         if 'analyze' in self.jobs:
