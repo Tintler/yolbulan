@@ -12,6 +12,10 @@ ROOT = Path(__file__).resolve().parent
 def build():
     if sys.platform != 'win32':
         raise RuntimeError('Windows EXE yalnız Windows üzerinde derlenebilir.')
+    frontend = ROOT / 'frontend'
+    for asset in ('index.html', 'assets/app.js', 'assets/app.css'):
+        if not (frontend / asset).is_file():
+            raise RuntimeError(f'Arayüz dosyası bulunamadı: {frontend / asset}')
     destination = ROOT / 'dist' / 'Yolbulan'
     # A plain mkdir inherits the project folder's permissions. tempfile.mkdtemp on
     # Windows (Python 3.13+) restricts access to the current user, and that ACL would
@@ -23,6 +27,11 @@ def build():
                 '--onedir', '--windowed', '--name', 'Yolbulan', '--icon', str(ROOT / 'Yolbulan.ico'),
                 '--add-data', f'{ROOT / "kurallar.json"}:.',
                 '--add-data', f'{ROOT / "Yolbulan.png"}:.',
+                '--add-data', f'{ROOT / "Yolbulan.ico"}:.',
+                '--add-data', f'{frontend / "index.html"}:frontend',
+                '--add-data', f'{frontend / "assets"}:frontend/assets',
+                '--collect-data', 'webview', '--collect-all', 'pythonnet',
+                '--collect-all', 'clr_loader', '--exclude-module', 'PySide6',
                 '--collect-all', 'faster_whisper', '--collect-all', 'ctranslate2',
                 '--collect-all', 'av', '--distpath', str(temp / 'dist'),
                 '--workpath', str(temp / 'work'), '--specpath', str(temp / 'spec'),
