@@ -31,11 +31,12 @@ PROFILES = {
     'Dengeli': {'model': 'small', 'batch': 8, 'beam': 5, 'compute': 'float16'},
     'Hassas': {'model': 'large-v3', 'batch': 8, 'beam': 5, 'compute': 'float16'},
 }
-DEFAULTS = {'source': '', 'mode': MODE_SPEECH, 'profile': 'Dengeli', 'model': 'small',
+DEFAULTS = {'source': '', 'mode': MODE_SPEECH, 'theme': 'system', 'profile': 'Dengeli', 'model': 'small',
             'batch': 8, 'beam': 5, 'device': 'cuda', 'compute': 'float16', 'cuda_dir': '',
             'lm_host': '127.0.0.1', 'lm_port': 1234, 'lm_model': '', 'lm_thinking': 'model',
             'lm_whole': True, 'lm_chunk_size': 12000, 'lm_retries': 2}
-CHOICES = {'mode': (MODE_SPEECH, MODE_NAME), 'profile': (*PROFILES, 'Özel'),
+CHOICES = {'mode': (MODE_SPEECH, MODE_NAME), 'theme': ('system', 'light', 'dark'),
+           'profile': (*PROFILES, 'Özel'),
            'model': ('small', 'medium', 'large-v3', 'turbo'), 'device': ('cpu', 'cuda'),
            'compute': ('float16', 'int8_float16', 'int8'), 'lm_thinking': ('off', 'model')}
 RANGES = {'batch': (1, 32), 'beam': (1, 10), 'lm_port': (1, 65535),
@@ -210,6 +211,14 @@ class YolbulanApi:
     @_native_only
     def bind_window(self, window):
         self._window = window
+
+    def set_window_theme(self, theme):
+        native = getattr(self._window, 'native', None)
+        if native is None or theme not in ('light', 'dark'):
+            return
+        from webview.platforms.winforms import DwmSetWindowAttribute
+
+        DwmSetWindowAttribute(native.Handle.ToInt64(), 20, int(theme == 'dark'))
 
     def browse_folder(self, initial=''):
         try:

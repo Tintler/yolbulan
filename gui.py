@@ -8,6 +8,19 @@ from webview.guilib import initialize
 from yolbulan_api import BASE, DEFAULTS, SETTINGS, YolbulanApi, configure_cuda
 
 
+def window_background(theme):
+    if theme == 'system':
+        import winreg
+
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize') as key:
+                theme = 'light' if winreg.QueryValueEx(key, 'AppsUseLightTheme')[0] else 'dark'
+        except OSError:
+            theme = 'light'
+    return '#202321' if theme == 'dark' else '#f7f7f4'
+
+
 def main():
     if sys.platform != 'win32':
         raise RuntimeError('Yolbulan Windows üzerinde çalışır.')
@@ -19,8 +32,9 @@ def main():
             raise RuntimeError('Yolbulan arayüz dosyaları bulunamadı.')
         api = YolbulanApi()
         try:
+            background = window_background(api.get_state()['settings']['theme'])
             window = webview.create_window('Yolbulan', str(index), js_api=api, width=1460, height=900,
-                                           min_size=(790, 540), background_color='#f8f5f1', text_select=True)
+                                           min_size=(790, 540), background_color=background, text_select=True)
             api.bind_window(window)
             window.events.closing += api.on_closing
             webview.start(gui='edgechromium', icon=str(BASE / 'Yolbulan.ico'))

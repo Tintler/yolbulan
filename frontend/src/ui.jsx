@@ -1,13 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 
-export function Brand() {
-  return <svg aria-hidden="true" viewBox="0 0 48 48" fill="none" className="brand-mark">
-    <path d="M23 42c0-12-1-19-13-28M23 34c2-13 10-23 18-28" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="m6 14 4-4m26-1 4 4" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" />
-  </svg>
-}
-
 export function IconButton({ icon: Icon, label, className = '', ...props }) {
   return <button className={`icon-button ${className}`} type="button" title={label} aria-label={label} {...props}>
     <Icon aria-hidden="true" />

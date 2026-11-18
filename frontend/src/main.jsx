@@ -1,13 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { CircleAlert, Folder, Settings as SettingsIcon, SlidersHorizontal, Undo2, X } from 'lucide-react'
 import { accept, connect } from './bridge'
 import { Queue } from './queue'
 import { Rules, Settings } from './preferences'
-import { Brand, IconButton, Modal } from './ui'
+import { IconButton, Modal } from './ui'
 import './style.css'
 
 const RAIL = [['queue', 'Video kuyruğu', Folder], ['rules', 'Kurallar', SlidersHorizontal], ['settings', 'Ayarlar', SettingsIcon]]
+const SYSTEM_THEME = matchMedia('(prefers-color-scheme: dark)')
 
 function App() {
   const [api, setApi] = useState(null)
@@ -16,11 +17,30 @@ function App() {
   const [view, setView] = useState('compact')
   const [modal, setModal] = useState(null)
   const [message, setMessage] = useState(null)
+  const [systemTheme, setSystemTheme] = useState(() => SYSTEM_THEME.matches ? 'dark' : 'light')
   const confirmedNotice = useRef('')
   const revision = useRef(0)
   const commands = useRef(Promise.resolve())
+  const ready = Boolean(state)
+  const theme = state?.settings.theme || 'system'
+  const resolvedTheme = theme === 'system' ? systemTheme : theme
 
   useEffect(() => { connect().then(setApi) }, [])
+
+  useEffect(() => {
+    const update = ({ matches }) => setSystemTheme(matches ? 'dark' : 'light')
+    SYSTEM_THEME.addEventListener('change', update)
+    update(SYSTEM_THEME)
+    return () => SYSTEM_THEME.removeEventListener('change', update)
+  }, [])
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = resolvedTheme
+  }, [resolvedTheme])
+
+  useEffect(() => {
+    if (ready) api.set_window_theme(resolvedTheme).catch(() => {})
+  }, [api, ready, resolvedTheme, systemTheme])
 
   useEffect(() => {
     if (!api) return undefined
@@ -79,7 +99,6 @@ function App() {
 
   return <div className="app-shell">
     <nav className="rail" aria-label="Yolbulan">
-      <Brand />
       <div className="rail-links">
         {RAIL.map(([key, label, icon]) => <IconButton key={key} icon={icon} label={label}
           aria-current={page === key ? 'page' : undefined} disabled={!state} onClick={() => setPage(key)} />)}

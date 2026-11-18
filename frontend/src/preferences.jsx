@@ -89,9 +89,12 @@ export function Settings({ state, run }) {
 
   return <PreferencePage title="Ayarlar" saving={saving} dirty={dirty} onSave={save} onReset={() => setDraft(state.settings)}>
     <div className="settings-grid">
-      <section className="setting-panel settings-mode">
-        <h2>Video analizi</h2>
-        <Field label="Analiz modu">{choice('mode', [MODE_SPEECH, MODE_NAME])}</Field>
+      <section className="setting-panel settings-general">
+        <h2>Genel</h2>
+        <div className="settings-fields">
+          <Field label="Görünüm">{choice('theme', [['system', 'Sistem'], ['light', 'Açık'], ['dark', 'Koyu']])}</Field>
+          <Field label="Analiz modu">{choice('mode', [MODE_SPEECH, MODE_NAME])}</Field>
+        </div>
       </section>
       <section className="setting-panel">
         <h2>Konuşmayı yazıya dökme</h2>
