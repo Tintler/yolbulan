@@ -1,0 +1,55 @@
+:root {
+  --queue-match: #7442a3;
+  --queue-no-match: #865b00;
+  --queue-error: #ad3030;
+  --queue-running: #155dad;
+  --queue-match-bg: #e2dae7;
+  --queue-no-match-bg: #ebe4d4;
+  --queue-error-bg: #ebd7d5;
+  --queue-running-bg: #d3dee9;
+}
+
+:root[data-theme='dark'] {
+  --queue-match: #caa9ff;
+  --queue-no-match: #ffd874;
+  --queue-error: #ff9090;
+  --queue-running: #82bafc;
+  --queue-match-bg: #494355;
+  --queue-no-match-bg: #565035;
+  --queue-error-bg: #563d3c;
+  --queue-running-bg: #374755;
+}
+
+.queue-status-cell { width: min(26%, 136px); }
+
+.queue-status {
+  display: inline-block;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--status-color, var(--muted));
+  background: var(--status-background, transparent);
+  font-size: 12px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.queue-status:is([data-status='name'], [data-status='speech']) {
+  --status-color: var(--queue-match);
+  --status-background: var(--queue-match-bg);
+}
+.queue-status[data-status='none'] {
+  --status-color: var(--queue-no-match);
+  --status-background: var(--queue-no-match-bg);
+}
+.queue-status:is([data-status='error'], [data-status='move_failed']) {
+  --status-color: var(--queue-error);
+  --status-background: var(--queue-error-bg);
+}
+.queue-status:is([data-status='working'], [data-status='moving']) {
+  --status-color: var(--queue-running);
+  --status-background: var(--queue-running-bg);
+}
+
+@media (forced-colors: active) {
+  .selected-row .queue-status { color: HighlightText; background: transparent; forced-color-adjust: none; }
+}

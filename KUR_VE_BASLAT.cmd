@@ -25,11 +25,11 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 if not exist ".venv\Scripts\python.exe" goto failed
-if not exist ".venv\video-ayiklayici-deps-v2.ok" (
+if not exist ".venv\video-ayiklayici-deps-v3.ok" (
     echo Bagimliliklar kuruluyor. Ilk calistirmada birkac dakika surebilir...
     ".venv\Scripts\python.exe" -m pip install -r "requirements.txt"
     if errorlevel 1 goto failed
-    type nul > ".venv\video-ayiklayici-deps-v2.ok"
+    type nul > ".venv\video-ayiklayici-deps-v3.ok"
 )
 
 if /I "%~1"=="--only-install" exit /b 0

@@ -1,0 +1,46 @@
+.app-shell:has(.title-bar) {
+  grid-template-rows: 33px minmax(0, 1fr);
+}
+
+.title-bar {
+  -webkit-app-region: drag;
+  app-region: drag;
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: stretch;
+  justify-content: space-between;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  user-select: none;
+}
+
+.title-name {
+  display: flex;
+  align-items: center;
+  padding-inline: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.caption-buttons {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  display: flex;
+}
+
+.caption-button {
+  display: grid;
+  place-items: center;
+  width: 45px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+}
+
+.caption-button:hover { background: var(--hover); }
+.caption-button:active { background: var(--subtle); }
+.caption-button:focus-visible { outline-offset: -3px; }
+.caption-close:hover, .caption-close:active { background: #be302a; color: #fff; }

@@ -18,3 +18,4 @@ yolbulan-derleme-*/
 *.zip
 *.log
 CLAUDE.md
+frontend/node_modules/
