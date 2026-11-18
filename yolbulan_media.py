@@ -8,6 +8,7 @@ import threading
 from collections import deque
 from fractions import Fraction
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from itertools import islice
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -17,6 +18,7 @@ import ayikla as core
 
 
 PREVIEW_SECONDS = 24
+THUMBNAIL_DECODE_LIMIT = 120
 VIDEO_CODECS = {'video/mp4': {'h264', 'av1', 'vp9'}, 'video/webm': {'vp8', 'vp9', 'av1'}}
 AUDIO_CODECS = {'video/mp4': {'aac', 'mp3', 'opus'}, 'video/webm': {'vorbis', 'opus'}}
 
@@ -35,6 +37,17 @@ def _picture(frame):
     frame.pts = 0
     frame.time_base = encoder.time_base
     return b''.join(bytes(packet) for packet in [*encoder.encode(frame), *encoder.encode(None)])
+
+
+def _visible_pixels(frame):
+    sample = frame.reformat(width=48, height=28, format='gray')
+    plane = sample.planes[0]
+    pixels = memoryview(plane)
+    bright = 0
+    for y in range(sample.height):
+        start = y * plane.line_size
+        bright += sum(value >= 32 for value in pixels[start:start + sample.width])
+    return bright / (sample.width * sample.height)
 
 
 class _Source:
@@ -94,9 +107,47 @@ class _Source:
 
     def _thumbnail(self, container, stream):
         try:
-            frame = next(container.decode(stream), None)
-            if frame is not None:
-                self.picture = _picture(frame)
+            best_frame = None
+            best_score = -1
+            time_base = stream.time_base
+            duration = float(stream.duration * time_base) if stream.duration and time_base else self.duration
+            if time_base:
+                origin = stream.start_time
+                if origin is None:
+                    origin = round((container.start_time or 0) / av.time_base / time_base)
+                offsets = [duration * fraction for fraction in (.5, .65, .8, .35)] if duration and duration > 0 else [16, 8, 3]
+                for offset in offsets:
+                    target = origin + int(offset / time_base)
+                    try:
+                        container.seek(target, stream=stream)
+                        frame = None
+                        for frame in islice(container.decode(stream), THUMBNAIL_DECODE_LIMIT):
+                            if frame.pts is None or frame.pts >= target:
+                                break
+                    except (av.FFmpegError, OSError, ValueError):
+                        continue
+                    if frame is not None:
+                        score = _visible_pixels(frame)
+                        if score >= .1 and (frame.pts is None or frame.pts >= target):
+                            self.picture = _picture(frame)
+                            return
+                        if score > best_score:
+                            best_frame, best_score = frame, score
+
+            # Non-seekable or very short media can still have decodable frames at the start.
+            if best_score < .1:
+                try:
+                    with av.open(str(self.path)) as fallback:
+                        for frame in islice(fallback.decode(fallback.streams.video[0]), 0, THUMBNAIL_DECODE_LIMIT, 6):
+                            score = _visible_pixels(frame)
+                            if score > best_score:
+                                best_frame, best_score = frame, score
+                            if score >= .1:
+                                break
+                except (av.FFmpegError, OSError, ValueError):
+                    pass
+            if best_frame is not None:
+                self.picture = _picture(best_frame)
         except (av.FFmpegError, OSError, ValueError):
             # A thumbnail decoding failure should not disable the player.
             pass

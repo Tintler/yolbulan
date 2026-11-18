@@ -220,6 +220,32 @@ class YolbulanApi:
 
         DwmSetWindowAttribute(native.Handle.ToInt64(), 20, int(theme == 'dark'))
 
+    def window_is_maximized(self):
+        native = getattr(self._window, 'native', None)
+        if native is None:
+            return False
+        from System.Windows.Forms import FormWindowState
+
+        return native.WindowState == FormWindowState.Maximized
+
+    def window_has_custom_frame(self):
+        return hasattr(self._window, '_frame_proc')
+
+    def control_window(self, action):
+        if self._window is None:
+            return False
+        if action == 'close':
+            self._window.destroy()
+            return False
+        elif action == 'minimize':
+            self._window.minimize()
+        elif action == 'toggle_maximize':
+            if self.window_is_maximized():
+                self._window.restore()
+            else:
+                self._window.maximize()
+        return self.window_is_maximized()
+
     def browse_folder(self, initial=''):
         try:
             from webview import FileDialog

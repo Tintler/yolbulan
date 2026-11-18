@@ -5,7 +5,9 @@ import { accept, connect } from './bridge'
 import { Queue } from './queue'
 import { Rules, Settings } from './preferences'
 import { IconButton, Modal } from './ui'
+import { TitleBar } from './titlebar'
 import './style.css'
+import './queue-status.css'
 
 const RAIL = [['queue', 'Video kuyruğu', Folder], ['rules', 'Kurallar', SlidersHorizontal], ['settings', 'Ayarlar', SettingsIcon]]
 const SYSTEM_THEME = matchMedia('(prefers-color-scheme: dark)')
@@ -98,6 +100,7 @@ function App() {
   }
 
   return <div className="app-shell">
+    <TitleBar api={api} />
     <nav className="rail" aria-label="Yolbulan">
       <div className="rail-links">
         {RAIL.map(([key, label, icon]) => <IconButton key={key} icon={icon} label={label}

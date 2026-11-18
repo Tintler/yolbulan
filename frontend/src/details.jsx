@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Clapperboard, ExternalLink, FileText, Folder, FolderOpen, Play, X } from 'lucide-react'
-import { accept, CHECKABLE, clock, folderLabel, STATUS } from './bridge'
+import { ChevronLeft, ChevronRight, Clapperboard, ExternalLink, FileText, FolderOpen, Play, X } from 'lucide-react'
+import { accept, CHECKABLE, clock, STATUS } from './bridge'
+import { TargetPicker } from './target-picker'
 import { IconButton, Modal } from './ui'
 
 function Highlighted({ text, spans = [], active = -1, startIndex = 0 }) {
@@ -122,7 +123,6 @@ function VideoDetails({ entry, state, api, run }) {
     return null
   }
 
-  const targets = [...new Set([...(state.targets || []), entry.target].filter(Boolean))]
   return <aside className="details" aria-label="Video ayrıntıları">
     <div className="preview">
       {playback !== null && media?.url && !playbackError
@@ -158,12 +158,8 @@ function VideoDetails({ entry, state, api, run }) {
     </section>
     <section className="detail-section target-section">
       <h3>Hedef klasör</h3>
-      <div className="target-select"><Folder aria-hidden="true" /><select aria-label="Hedef klasör"
-        value={entry.target || ''} disabled={!CHECKABLE.has(entry.status)}
-        onChange={event => run('set_target', [entry.path], event.target.value || null)}>
-        <option value="">Yerinde kalsın</option>
-        {targets.map(target => <option value={target} key={target}>{folderLabel(target)}</option>)}
-      </select><ChevronDown aria-hidden="true" /></div>
+      <TargetPicker value={entry.target || ''} targets={state.targets} disabled={!CHECKABLE.has(entry.status)}
+        onChange={target => run('set_target', [entry.path], target)} />
     </section>
     {showTranscript && <Transcript entry={entry} segments={segments} onClose={() => setShowTranscript(false)} playAt={playAt} />}
   </aside>

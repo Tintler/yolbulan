@@ -120,11 +120,11 @@ svg { vertical-align: middle; }
 .filter-group, .queue-actions { gap: 4px; }
 .source-picker, .filter-options { position: relative; min-width: 0; }
 .source-picker { flex: 1 1 172px; max-width: 270px; }
-.source-toggle, .target-select { display: flex; align-items: center; width: 100%; background: transparent; border: 1px solid var(--control-line); border-radius: 5px; }
+.source-toggle { display: flex; align-items: center; width: 100%; background: transparent; border: 1px solid var(--control-line); border-radius: 5px; }
 .source-toggle { gap: 6px; justify-content: space-between; padding: 0 7px; min-height: 28px; }
 .source-toggle svg { width: 15px; height: 15px; stroke-width: 1.8; }
 .source-toggle span { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.source-toggle:hover, .target-select:hover { background: var(--surface); }
+.source-toggle:hover { background: var(--surface); }
 .view-toggle { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; padding: 2px; border-radius: 6px; background: var(--subtle); }
 .view-toggle button { display: inline-flex; justify-content: center; align-items: center; gap: 5px; min-height: 24px; padding: 0 7px; border: 0; border-radius: 4px; background: transparent; white-space: nowrap; }
 .view-toggle button svg { width: 14px; height: 14px; }
@@ -148,8 +148,7 @@ svg { vertical-align: middle; }
 .floating-menu button span { color: var(--muted); }
 .context-menu { position: fixed; top: auto; left: auto; }
 .context-target { display: grid; gap: 3px; padding: 3px 7px 5px; }
-.context-target span { font-size: 12px; color: var(--muted); }
-.context-target select { max-width: 205px; min-height: 26px; padding: 3px; border: 1px solid var(--control-line); border-radius: 4px; background: var(--control); color: inherit; }
+.context-target > span { font-size: 12px; color: var(--muted); }
 .analysis-bar { display: flex; align-items: center; gap: 7px; margin: -3px 0 5px; min-height: 22px; color: var(--muted); font-size: 12px; }
 .analysis-bar span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .analysis-bar progress { flex: 1; max-width: 210px; min-width: 30px; height: 7px; accent-color: var(--pine); }
@@ -218,13 +217,6 @@ mark.current-match { background: var(--mark-active); }
 .status-name, .status-speech { color: var(--link); background: var(--mint); }
 .status-none, .status-pending { color: var(--warning-text); background: var(--warning-bg); }
 .status-error, .status-move_failed { color: var(--error-text); background: var(--error-bg); }
-.target-select { position: relative; margin-top: 6px; }
-.target-select select { width: 100%; min-height: 28px; appearance: none; padding: 0 25px 0 29px; border: 0; border-radius: inherit; background: transparent; color: inherit; cursor: pointer; }
-.target-select option { background: var(--control); color: var(--text); }
-.target-select select:disabled { cursor: default; color: var(--muted); }
-.target-select svg { position: absolute; pointer-events: none; width: 15px; height: 15px; stroke-width: 1.7; }
-.target-select svg:first-child { left: 7px; }
-.target-select svg:last-child { right: 6px; }
 
 .details-empty, .queue-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; color: var(--muted); padding: 12px; }
 .queue-empty { border-top: 1px solid var(--line); }

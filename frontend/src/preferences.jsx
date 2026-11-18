@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
-import { FolderOpen, Plus, Save, Trash2 } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { FolderOpen, Maximize2, Plus, Save, Trash2 } from 'lucide-react'
 import { MODE_NAME, MODE_SPEECH } from './bridge'
-import { IconButton } from './ui'
+import { IconButton, Modal } from './ui'
+import './editors.css'
 
 function Field({ label, help, className = '', children }) {
   return <label className={`field ${className}`} title={help}><span>{label}</span>{children}</label>
@@ -141,11 +142,32 @@ const blankRule = { folder: '', name_terms: '', name_negative_terms: '', audio_d
 const editRules = rules => rules.map(rule => ({ ...rule, name_terms: rule.name_terms.join(', '),
   name_negative_terms: rule.name_negative_terms.join(', '), id: crypto.randomUUID() }))
 const terms = value => value.split(',').map(term => term.trim()).filter(Boolean)
+const TERM_FIELDS = [['name_terms', 'Dosya adı terimleri (+)'], ['name_negative_terms', 'Dosya adı engelleri (−)']]
+
+function TermEditor({ label, folder, initialValue, onClose, onSave }) {
+  const [value, setValue] = useState(initialValue)
+  const editor = useRef(null)
+  useEffect(() => { editor.current.focus() }, [])
+
+  return <Modal title={folder ? `${label} · ${folder}` : label} className="term-editor" onClose={onClose} footer={<>
+    <button className="secondary button" type="button" onClick={onClose}>Vazgeç</button>
+    <button className="primary button" type="button" onClick={() => onSave(value)}><Save size={16} />Uygula</button>
+  </>}>
+    <textarea ref={editor} aria-label={label} wrap="soft" value={value} onChange={event => setValue(event.target.value)}
+      onKeyDown={event => {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) {
+          event.preventDefault()
+          onSave(value)
+        }
+      }} />
+  </Modal>
+}
 
 export function Rules({ state, run }) {
   const [draft, setDraft] = useState(() => editRules(state.rules))
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [editingTerms, setEditingTerms] = useState(null)
 
   function update(id, key, value) {
     setDraft(rules => rules.map(rule => rule.id === id ? { ...rule, [key]: value } : rule))
@@ -169,14 +191,17 @@ export function Rules({ state, run }) {
     } finally { setSaving(false) }
   }
 
-  return <PreferencePage title="Kurallar" saving={saving} dirty={dirty} onSave={save} onReset={() => reset(state.rules)}>
+  return <><PreferencePage title="Kurallar" saving={saving} dirty={dirty} onSave={save} onReset={() => reset(state.rules)}>
     <p className="preference-intro">Her hedef için dosya adı terimi veya ses içeriği tanımı girin. Terimleri virgülle ayırın.</p>
     <div className="rule-list">
       {draft.map(rule => <section className="rule-card" key={rule.id}>
         <div className="rule-fields">
           <Field label="Hedef alt klasör"><input value={rule.folder} onChange={event => update(rule.id, 'folder', event.target.value)} /></Field>
-          <Field label="Dosya adı terimleri (+)"><input value={rule.name_terms} onChange={event => update(rule.id, 'name_terms', event.target.value)} /></Field>
-          <Field label="Dosya adı engelleri (−)"><input value={rule.name_negative_terms} onChange={event => update(rule.id, 'name_negative_terms', event.target.value)} /></Field>
+          {TERM_FIELDS.map(([key, label]) => <div className="rule-term-field" key={key}>
+            <Field label={label}><input value={rule[key].replace(/[\r\n]/g, ' ')} onChange={event => update(rule.id, key, event.target.value)} /></Field>
+            <IconButton icon={Maximize2} label={`${label} alanını genişlet`} disabled={saving}
+              onClick={() => setEditingTerms({ rule, key, label })} />
+          </div>)}
           <Field label="Ses içeriği tanımı (AI)" className="rule-audio"><textarea rows={2} value={rule.audio_description}
             onChange={event => update(rule.id, 'audio_description', event.target.value)} /></Field>
         </div>
@@ -188,4 +213,9 @@ export function Rules({ state, run }) {
       setDraft(rules => [...rules, { ...blankRule, id: crypto.randomUUID() }]); setDirty(true)
     }}><Plus size={17} />Kural ekle</button>
   </PreferencePage>
+  {editingTerms && <TermEditor label={editingTerms.label} folder={editingTerms.rule.folder}
+    initialValue={editingTerms.rule[editingTerms.key]} onClose={() => setEditingTerms(null)} onSave={value => {
+      if (value !== editingTerms.rule[editingTerms.key]) update(editingTerms.rule.id, editingTerms.key, value)
+      setEditingTerms(null)
+    }} />}</>
 }

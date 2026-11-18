@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, Clapperboard, Filter, Folder, FolderOpen, Grid2X2, List, ListChecks, RefreshCw, Search, Undo2, X } from 'lucide-react'
 import { CHECKABLE, clock, folderLabel, MODE_NAME, MODE_SPEECH, REANALYZABLE, searchable, STATUS } from './bridge'
 import { Details } from './details'
+import { TargetPicker } from './target-picker'
 import { IconButton } from './ui'
 
 const FILTERS = [
@@ -268,6 +269,7 @@ export function Queue({ state, api, run, setModal, view, setView }) {
               {view === 'visual' && <th className="thumbnail-cell" aria-label="Küçük resim" />}
               <th className="filename-cell" aria-sort={sort.key === 'name' ? sort.direction === 1 ? 'ascending' : 'descending' : 'none'}>{sortHeading('Dosya adı', 'name')}</th>
               {view === 'compact' && <th className="duration-cell" aria-sort={sort.key === 'duration' ? sort.direction === 1 ? 'ascending' : 'descending' : 'none'}>{sortHeading('Süre', 'duration')}</th>}
+              <th className="queue-status-cell" scope="col">Durum</th>
               <th className="folder-cell" aria-sort={sort.key === 'target' ? sort.direction === 1 ? 'ascending' : 'descending' : 'none'}>{sortHeading('Önerilen klasör', 'target')}</th>
             </tr></thead>
             <tbody>{visible.map((entry, index) => <tr key={entry.path} tabIndex={active?.path === entry.path ? 0 : -1}
@@ -288,10 +290,11 @@ export function Queue({ state, api, run, setModal, view, setView }) {
               {view === 'visual' && <td className="thumbnail-cell"><Thumbnail url={entry.thumbnail_url} /></td>}
               <td className="filename-cell"><span title={entry.path}>{entry.name}</span></td>
               {view === 'compact' && <td className="duration-cell">{clock(entry.duration)}</td>}
-              <td className="folder-cell"><span className={!entry.target ? 'muted' : undefined}
-                title={entry.note || entry.label || STATUS[entry.status]}>
-                <Folder aria-hidden="true" />{entry.target ? folderLabel(entry.target) : entry.label || STATUS[entry.status]}
-              </span></td>
+              <td className="queue-status-cell"><span className="queue-status" data-status={entry.status}
+                title={entry.note || entry.label || STATUS[entry.status]}>{entry.label || STATUS[entry.status]}</span></td>
+              <td className="folder-cell">{entry.target
+                ? <span title={folderLabel(entry.target)}><Folder aria-hidden="true" />{folderLabel(entry.target)}</span>
+                : <span className="muted">—</span>}</td>
             </tr>)}</tbody>
           </table>
         </div> : <EmptyQueue source={source} hasEntries={Boolean(entries.length)} busy={busy} run={run} />}
@@ -315,11 +318,10 @@ export function Queue({ state, api, run, setModal, view, setView }) {
     {context && <div className="floating-menu context-menu" style={{ left: context.x, top: context.y }}>
       <button disabled={!context.rows.some(row => CHECKABLE.has(row.status))} onClick={() => { toggleSelection(context.rows); setContext(null) }}>
         {context.rows.filter(row => CHECKABLE.has(row.status)).every(row => row.checked) ? 'İşareti kaldır' : 'İşaretle'}</button>
-      <label className="context-target"><span>Hedef klasör</span><select defaultValue="__choose__" disabled={!context.rows.some(row => CHECKABLE.has(row.status))}
-        onChange={event => { run('set_target', context.rows.map(row => row.path), event.target.value || null); setContext(null) }}>
-        <option value="__choose__" disabled>Hedef seç…</option><option value="">Yerinde kalsın</option>
-        {state.targets.map(folder => <option value={folder} key={folder}>{folderLabel(folder)}</option>)}
-      </select></label>
+      <div className="context-target"><span>Hedef klasör</span>
+        <TargetPicker targets={state.targets} disabled={!context.rows.some(row => CHECKABLE.has(row.status))}
+          onChange={target => { run('set_target', context.rows.map(row => row.path), target); setContext(null) }} />
+      </div>
       {!nameOnly && <button disabled={!context.rows.some(row => REANALYZABLE.has(row.status))}
         onClick={() => { run('queue_for_speech', context.rows.map(row => row.path)); setContext(null) }}>Ses analizine ekle</button>}
       {context.rows.length === 1 && <>
